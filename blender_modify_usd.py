@@ -163,7 +163,7 @@ def save():
             except Exception as e:
                 print(e)
 
-        stage.GetRootLayer().Save()
+    stage.GetRootLayer().Save()
 
 class LoadScene(bpy.types.Operator):
     bl_idname = "object.reload_scene"        # Unique identifier for buttons and menu items to reference.
