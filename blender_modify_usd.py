@@ -11,6 +11,10 @@ def load(filename):
     stage = Usd.Stage.Open(filename)
     cache = UsdGeom.XformCache()
     stack = [(stage.GetDefaultPrim(), None)]
+    prototype_collection = bpy.data.collections.new("prototypes")
+    bpy.context.scene.collection.children.link(prototype_collection)
+
+    reference_collections = {}
 
     # Todo: we can probably just traverse the stage normally but
     # this makes setting the parent object slightly easier.
@@ -19,22 +23,37 @@ def load(filename):
 
         object = bpy.data.objects.new(str(prim.GetPath()), None)
         object.matrix_basis = list(cache.GetLocalTransformation(prim)[0])
+        object_to_prim[object] = [prim, copy.copy(object.matrix_basis)]
+        bpy.context.scene.collection.objects.link(object)
+
 
         if parent_obj is not None:
             object.parent = parent_obj
-        bpy.context.scene.collection.objects.link(object)
 
-        object_to_prim[object] = [prim, copy.copy(object.matrix_basis)]
+        arcs = Usd.PrimCompositionQuery.GetDirectReferences(prim).GetCompositionArcs()
 
-        for child in prim.GetChildren():
-            stack.append((child, object))
+        if len(arcs) > 0:
+            direct_ref = arcs[0]
+            rel_path_from_base_dir = os.path.relpath(direct_ref.GetTargetLayer().realPath, os.path.dirname(stage.GetRootLayer().realPath))
+            collection_name = rel_path_from_base_dir + direct_ref.GetTargetPrimPath().pathString
+
+            object.instance_type = "COLLECTION"
+
+            if collection_name in reference_collections:
+                object.instance_collection = reference_collections[collection_name]
+            else:
+                collection = bpy.data.collections.new(collection_name)
+                prototype_collection.children.link(collection)
+                reference_collections[collection_name] = collection
+                object.instance_collection = collection
+        else:
+            for child in prim.GetChildren():
+                stack.append((child, object))
 
 def save():
     for object, (prim, original_matrix) in object_to_prim.items():
         if object.matrix_basis == original_matrix:
             continue
-
-        print(prim, object)
 
         original_pos, original_rot, original_scale = original_matrix.decompose()
 
@@ -67,7 +86,7 @@ def save():
                 xform_ops[0].Set(Gf.Vec3d(list(pos)))
             # Todo: quaternion to xyz.
             if rot_modified:
-                assert False
+                pass
                 #xform_ops[1].Set(Gf.Quatd(*list(rot)))
             if scale_modified:
                 xform_ops[2].Set(Gf.Vec3d(list(scale)))
@@ -101,7 +120,7 @@ def save():
                     is_known_unsupported = True
             assert is_known_unsupported
 
-            prim.ClearXformOpOrder()
+            #prim.ClearXformOpOrder()
             #prim.AddXformOp(UsdGeom.XformOp.TypeTranslate).Set(Gf.Vec3d(list(pos)))
             #prim.AddXformOp(UsdGeom.XformOp.TypeOrient).Set(Gf.Quatd(*list(rot)))
             #prim.AddXformOp(UsdGeom.XformOp.TypeScale).Set(Gf.Vec3d(list(scale)))
