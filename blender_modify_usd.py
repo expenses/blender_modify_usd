@@ -1,8 +1,5 @@
-# coding: utf-8
 from pxr import Usd, UsdGeom, UsdShade, Sdf, Gf, Tf
-import sys
 import bpy
-import os
 import copy
 
 stage = None
@@ -10,6 +7,7 @@ object_to_prim = {}
 
 def load(filename):
     global stage
+    object_to_prim.clear()
     stage = Usd.Stage.Open(filename)
     cache = UsdGeom.XformCache()
     stack = [(stage.GetDefaultPrim(), None)]
@@ -31,14 +29,12 @@ def load(filename):
         for child in prim.GetChildren():
             stack.append((child, object))
 
-def modify():
-    for object in bpy.data.objects:
-        object.location.x += 1
-
 def save():
     for object, (prim, original_matrix) in object_to_prim.items():
         if object.matrix_basis == original_matrix:
             continue
+
+        print(prim, object)
 
         original_pos, original_rot, original_scale = original_matrix.decompose()
 
@@ -64,7 +60,8 @@ def save():
             if rot_modified:
                 xform_ops[1].Set(Gf.Quatd(*list(rot)))
             if scale_modified:
-                xform_ops[2].Set(Gf.Vec3d(list(scale)))
+                pass
+                #xform_ops[2].Set(Gf.Vec3d(list(scale)))
         elif types == ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]:
             if pos_modifed:
                 xform_ops[0].Set(Gf.Vec3d(list(pos)))
@@ -105,15 +102,50 @@ def save():
             assert is_known_unsupported
 
             prim.ClearXformOpOrder()
-            prim.AddXformOp(UsdGeom.XformOp.TypeTranslate).Set(Gf.Vec3d(list(pos)))
-            prim.AddXformOp(UsdGeom.XformOp.TypeOrient).Set(Gf.Quatd(*list(rot)))
-            prim.AddXformOp(UsdGeom.XformOp.TypeScale).Set(Gf.Vec3d(list(scale)))
+            #prim.AddXformOp(UsdGeom.XformOp.TypeTranslate).Set(Gf.Vec3d(list(pos)))
+            #prim.AddXformOp(UsdGeom.XformOp.TypeOrient).Set(Gf.Quatd(*list(rot)))
+            #prim.AddXformOp(UsdGeom.XformOp.TypeScale).Set(Gf.Vec3d(list(scale)))
 
         stage.GetRootLayer().Save()
 
+class LoadScene(bpy.types.Operator):
+    bl_idname = "object.load_scene"        # Unique identifier for buttons and menu items to reference.
+    bl_label = "Load Scene"         # Display name in the interface.
+    bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
 
-load(sys.argv[1])
-modify()
-save()
+    def execute(self, context):        # execute() is called when running the operator.
+        load("C:\\Users\\Ashley\\Desktop\\Kitchen_set\\Kitchen_set_instanced.usd")
 
-bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath("test.blend"))
+        return {'FINISHED'}            # Lets Blender know the operator finished successfully.
+
+class SaveScene(bpy.types.Operator):
+    bl_idname = "object.save_scene"        # Unique identifier for buttons and menu items to reference.
+    bl_label = "Save Scene"         # Display name in the interface.
+    bl_options = {'REGISTER', 'UNDO'}  # Enable undo for the operator.
+
+    def execute(self, context):        # execute() is called when running the operator.
+        save()
+
+        return {'FINISHED'}            # Lets Blender know the operator finished successfully.
+
+
+class SaveLoadPanel(bpy.types.Panel):
+    bl_label = "Save/Load"
+    bl_category = "USD"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+
+    def draw(self, context):
+        layout = self.layout
+
+        box = layout.box()
+        #box.label(text="Selection Tools")
+        #box.operator("object.select_all").action = 'TOGGLE'
+        row = box.row()
+        #row.operator("object.select_all").action = 'INVERT'
+        row.operator("object.load_scene")
+        row.operator("object.save_scene")
+
+bpy.utils.register_class(LoadScene)
+bpy.utils.register_class(SaveScene)
+bpy.utils.register_class(SaveLoadPanel)
