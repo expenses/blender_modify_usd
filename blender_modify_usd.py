@@ -40,6 +40,9 @@ def load(filename):
 
         bpy.context.scene.collection.objects.link(object)
 
+        if UsdGeom.Imageable(prim).ComputeVisibility() == "invisible":
+            object.hide_set(True)
+
         # Todo: we want to import prims if they're not referenced at all.
         #if prim.GetTypeName() == "Mesh":
         #    bpy.ops.wm.usd_import(filepath = filename, prim_path_mask = str(prim.GetPath()))
