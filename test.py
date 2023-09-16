@@ -1,15 +1,17 @@
 import bpy
-from bpy_extras.io_utils import ExportHelper
+from bpy_extras.io_utils import ImportHelper, ExportHelper
 import copy
 import sys 
 from pxr import Usd, UsdGeom, UsdShade, Sdf, Gf
+import os
 
 base_transforms = {}
+root_filename = None
 
 def store_current_transforms():
     base_transforms.clear()
     for object in bpy.data.objects:
-        if "usd_path" in object:
+        if "usd_prim_path" in object:
             base_transforms[object] = copy.copy(object.matrix_basis)
 
 def write_override(filename):
@@ -25,20 +27,33 @@ def write_override(filename):
             continue
         
         for child in object.children:
-            if "usd_path" in child and child not in base_transforms:
-                pos, rot, scale = child.matrix_basis.decompose()
+            if "usd_prim_path" in child and child not in base_transforms:
+                # Sanitise name for USD. This ensures there won't be any naming conflicts.
+                # An example of how things could go wrong otherwise:
+                # /root/cube is cloned as cube.001. It is then stored in the usd file
+                # as /root/cube_001. The file is reloaded and /root/cube is cloned again,
+                # also being called cube.001. we'd then have to make sure there isn't also an object
+                # called cube_001 before storing it into the usd.
+                child.name = child.name.replace(".", "_")
 
-                path = Sdf.Path(object["usd_path"]).AppendPath(child.name.replace(".", "_"))
-                prim = stage.DefinePrim(path, "Xform")
+                path = Sdf.Path(object["usd_prim_path"]).AppendPath(child.name)
+                prim_type = "Xform"
+                if "usd_type_name" in child:
+                    prim_type = child["usd_type_name"]
+                prim = stage.DefinePrim(path, prim_type)
                 
                 if "target_prim" in child and "target_layer" in child:
                     prim.SetInstanceable(True)
-                    prim.GetReferences().AddReference(child["target_layer"], child["target_prim"]) 
+                    rel_path = os.path.relpath(child["target_layer"], os.path.dirname(filename))
+                    prim.GetReferences().AddReference(rel_path, child["target_prim"]) 
                 
                 if "variant_name" in child and "variant_selection" in child:
                     prim.GetVariantSets().AddVariantSet(child["variant_name"]).SetVariantSelection(child["variant_selection"])
                 
                 prim = UsdGeom.Xformable(prim)
+                
+                pos, rot, scale = child.matrix_basis.decompose()
+                
                 prim.ClearXformOpOrder()
                 prim.AddXformOp(UsdGeom.XformOp.TypeTranslate).Set(Gf.Vec3d(list(pos)))
                 prim.AddXformOp(UsdGeom.XformOp.TypeOrient).Set(Gf.Quatd(*list(rot)))
@@ -50,7 +65,7 @@ def write_override(filename):
             continue
         
         if object.matrix_basis != base_transform:
-            prim = stage.OverridePrim(object["usd_path"])
+            prim = stage.OverridePrim(object["usd_prim_path"])
             prim = UsdGeom.Xformable(prim)
             
             pos, rot, scale = object.matrix_basis.decompose()
@@ -63,6 +78,14 @@ def write_override(filename):
     stage.GetRootLayer().Save()
 
     store_current_transforms()
+
+    if root_filename is not None:
+        root_stage = Usd.Stage.Open(root_filename)
+        root_layer = root_stage.GetRootLayer()
+        # https://docs.omniverse.nvidia.com/dev-guide/latest/programmer_ref/usd/layers/add-sublayer.html
+        root_layer.subLayerPaths.insert(0, stage.GetRootLayer().identifier)
+        root_layer.Save()
+
 
 class StoreCurrentTransforms(bpy.types.Operator):
     bl_idname = "object.store_current_transforms"        # Unique identifier for buttons and menu items to reference.
@@ -85,6 +108,25 @@ class WriteOverride(bpy.types.Operator, ExportHelper):
 
         return {'FINISHED'}            # Lets Blender know the operator finished successfully.
 
+
+class OT_TestOpenFilebrowser(bpy.types.Operator, ImportHelper):
+
+    bl_idname = "object.filebrowser_usd"
+    bl_label = "Select root usd"
+
+    filter_glob: bpy.props.StringProperty(
+        default='*.usd*',
+        options={'HIDDEN'}
+    )
+
+    def execute(self, context):
+        global root_filename
+        root_filename = self.filepath
+        # One less click.
+        store_current_transforms()
+
+        return {'FINISHED'}
+
 class SaveLoadPanel(bpy.types.Panel):
     bl_label = "Save/Load"
     bl_category = "USD"
@@ -95,9 +137,12 @@ class SaveLoadPanel(bpy.types.Panel):
         layout = self.layout
 
         box = layout.box()
+        box.row().label(text=root_filename or "None")
+        box.row().operator("object.filebrowser_usd")
         box.row().operator("object.store_current_transforms")
         box.row().operator("object.write_override")
 
+bpy.utils.register_class(OT_TestOpenFilebrowser)
 bpy.utils.register_class(StoreCurrentTransforms)
 bpy.utils.register_class(WriteOverride)
 bpy.utils.register_class(SaveLoadPanel)
