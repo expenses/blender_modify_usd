@@ -118,6 +118,9 @@ class Reload(bpy.types.Operator):
     def execute(self, context):  # execute() is called when running the operator.
         for object in bpy.data.objects:
             bpy.data.objects.remove(object, do_unlink=True)
+            
+        for collection in bpy.data.collections:
+            bpy.data.collections.remove(collection)
 
         if root_filename is not None:
             bpy.ops.wm.usd_import(
